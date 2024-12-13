@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+
+# BSD Zero Clause License
+#
+# Copyright (c) 2024 Oleg Oshmyan (Chortos-2) <chortos@inbox.lv>
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+# REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+# AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+# INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+# LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+# OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+# PERFORMANCE OF THIS SOFTWARE.
+
+import argparse
+import hashlib
+import os
+import pathlib
+import stat
+import torrent_parser as tp
+from tqdm import tqdm
+
+parser = argparse.ArgumentParser(description='Verify local file data against hashes listed in a torrent file.')
+parser.add_argument('torrent', type=tp.parse_torrent_file, help='path to the torrent file')
+parser.add_argument('local_data', type=pathlib.Path, help="path to the local data (single file or torrent's root directory)")
+
+group = parser.add_argument_group('Partial verification of multifile torrents',
+	'By default, all files named in the torrent will be verified. '
+	'To verify only some of the files or to use different file names, use one of the following options. '
+	"Specify the in-torrent path(s) relative to the torrent's root directory. "
+	'Separate subdirectories using forward slashes, e.g. "dir1/dir2/file"')
+group = group.add_mutually_exclusive_group()
+group.add_argument('-p', '--partial', metavar='SUBPATH', type=str, nargs='+',
+                   help="to verify a subset of files: the in-torrent paths to verify")
+group.add_argument('-r', '--renamed', metavar='RENAMED_PATH', type=str,
+                   help="to verify a single renamed file: the in-torrent path corresponding to the single file pointed to by local_data")
+args = parser.parse_args()
+
+
+info = args.torrent['info']
+piece_length = info['piece length']
+
+if args.partial:
+	args.partial = frozenset(args.partial)
+
+if 'files' in info:
+	files = info['files']
+	wanted_files = [False] * len(files)
+	wanted_pieces = [False] * len(info['pieces'])
+	torrent_pos = 0
+	for file_index, file in enumerate(files):
+		try:
+			if not file['path'] or any(not name or name in (os.curdir, os.pardir) or os.sep in name or '/' in name for name in file['path']):
+				file['local_path'] = None
+				continue
+			if args.renamed is not None:
+				if '/'.join(file['path']) != args.renamed:
+					file['local_path'] = None
+					continue
+				file['local_path'] = args.local_data
+			else:
+				file['local_path'] = args.local_data / pathlib.PurePath(*file['path'])
+				if args.partial and '/'.join(file['path']) not in args.partial:
+					continue
+			wanted_files[file_index] = True
+			for piece_index in range(torrent_pos // piece_length, -(-(torrent_pos + file['length']) // piece_length)):
+				wanted_pieces[piece_index] = True
+		finally:
+			torrent_pos += file['length']
+	if args.partial and sum(wanted_files) != len(args.partial):
+		parser.error('the torrent does not contain the specified --partial paths')
+	if args.renamed is not None and not any(wanted_files):
+		parser.error('the torrent does not contain the specified --renamed path')
+	wanted_total = piece_length * sum(wanted_pieces)
+	if wanted_pieces[-1]:
+		wanted_total -= -torrent_pos % piece_length
+else:
+	if args.partial or args.renamed is not None:
+		parser.error('the torrent contains only one file, so --partial and --renamed cannot be used')
+	files = [{'length': info['length'], path: args.local_data}]
+	wanted_files = [True]
+	wanted_pieces = [True] * len(info['pieces'])
+	wanted_total = info['length']
+
+
+def report_file(file, correct):
+	length = file['length']
+	# Round 1 byte to 0.1% and all but 1 bytes to 99.9%
+	if correct == length:
+		permille = 1000
+	elif correct * 1000 >= 999 * length:
+		permille = 999
+	elif 0 < correct * 1000 <= length:
+		permille = 1
+	else:
+		permille = (correct * 1000 + length // 2) // length
+	print(f'{"/".join(file["path"])}: {permille//10}.{permille%10}% ({correct:,}/{length:,})')
+
+
+def sha1():
+	return hashlib.sha1(usedforsecurity=False)
+try:
+	sha1()
+except TypeError:
+	from hashlib import sha1
+
+
+def hash_piece(file_pos):
+	global piece_filled
+	hash = sha1()
+	hash.update(memoryview(piece_buffer)[:piece_filled])
+	piece_index = (torrent_pos + file_pos) // piece_length
+	correct_pieces[piece_index] = hash.hexdigest() == info['pieces'][piece_index]
+	pbar.update(piece_filled)
+	piece_filled = 0
+
+
+correct_pieces = [False] * len(info['pieces'])
+piece_buffer = bytearray(piece_length)
+torrent_pos = piece_filled = 0
+with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as pbar:
+	for file_index, file in enumerate(files):
+		file_length = file['length']
+		if not file_length:
+			continue
+		try:
+			path = file['local_path']
+			if (not path
+			    or not wanted_files[file_index]
+			       and not wanted_pieces[torrent_pos // piece_length]
+			       and not wanted_pieces[(torrent_pos + file_length - 1) // piece_length]
+			):
+				piece_filled = 0
+				continue
+
+			if not path.is_file():
+				path = path.with_name(path.name + '.part')
+				if not path.is_file():
+					piece_filled = 0
+					continue
+
+			try:
+				stream = open(path, 'rb')
+			except (FileNotFoundError, IsADirectoryError):
+				piece_filled = 0
+				continue
+
+			with stream:
+				if not stat.S_ISREG(os.stat(stream.fileno()).st_mode):
+					piece_filled = 0
+					continue
+
+				piece_offset = -torrent_pos % piece_length
+				first_piece = torrent_pos // piece_length
+				last_piece = (torrent_pos + file_length - 1) // piece_length
+				if not wanted_files[file_index] and not wanted_pieces[first_piece]:
+					piece_filled = 0
+					piece_offset = file_length - (torrent_pos + file_length) % piece_length
+
+				remain = file_length
+				if piece_offset:
+					if not piece_filled or piece_filled + piece_offset != piece_length:
+						piece_filled = 0
+						nskipped = stream.seek(piece_offset)
+						if nskipped < piece_offset:
+							# File is too short
+							continue
+						remain -= piece_offset
+					else:
+						nread = stream.readinto(memoryview(piece_buffer)[piece_filled:])
+						if nread > file_length:
+							print(f'{"/".join(file["path"])}: local file is longer than specified in the torrent')
+						piece_filled += min(nread, remain)
+						if piece_filled == piece_length:
+							hash_piece(file_length - remain)
+						elif nread < file_length:
+							# File is too short
+							piece_filled = 0
+							continue
+						remain -= nread
+
+				if first_piece != last_piece and not wanted_files[file_index] and wanted_pieces[first_piece]:
+					assert not piece_filled
+					if not wanted_pieces[last_piece]:
+						continue
+					piece_offset = file_length - (torrent_pos + file_length) % piece_length
+					if piece_offset != file_length - remain:
+						nskipped = stream.seek(piece_offset)
+						if nskipped < piece_offset:
+							# File is too short
+							continue
+						remain -= piece_offset
+
+				while remain:
+					nread = stream.readinto(piece_buffer)
+					if nread > remain:
+						print(f'{"/".join(file["path"])}: local file is longer than specified in the torrent')
+					piece_filled += min(nread, remain)
+					if piece_filled == piece_length:
+						hash_piece(file_length - remain)
+					remain -= nread
+					if nread < piece_length:
+						if remain > 0:
+							# File is too short
+							piece_filled = 0
+						break
+				else:
+					if stream.readinto(piece_buffer[:1]):
+						print(f'{"/".join(file["path"])}: local file is longer than specified in the torrent')
+		finally:
+			torrent_pos += file_length
+	if 0 < piece_filled == torrent_pos % piece_length:
+		hash_piece(0)
+
+torrent_pos = 0
+for file_index, file in enumerate(files):
+	file_length = file['length']
+	if wanted_files[file_index]:
+		correct = 0
+		for piece_index in range(torrent_pos // piece_length, -(-(torrent_pos + file_length) // piece_length)):
+			if correct_pieces[piece_index]:
+				correct += min(torrent_pos + file_length, (piece_index + 1) * piece_length) - max(torrent_pos, piece_index * piece_length)
+		report_file(file, correct)
+	torrent_pos += file_length
