@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser(description='Verify local file data against has
 parser.add_argument('torrent', type=tp.parse_torrent_file, help='path to the torrent file')
 parser.add_argument('local_data', type=pathlib.Path, help="path to the local data (single file or torrent's root directory)")
 
-group = parser.add_argument_group('Partial verification of multifile torrents',
+group = parser.add_argument_group('optional arguments for multifile torrents',
 	'By default, all files named in the torrent will be verified. '
 	'To verify only some of the files or to use different file names, use one of the following options. '
 	"Specify the in-torrent path(s) relative to the torrent's root directory. "
