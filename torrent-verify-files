@@ -53,15 +53,15 @@ if 'files' in info:
 	torrent_pos = 0
 	for file_index, file in enumerate(files):
 		try:
-			if not file['path'] or any(not name or name in (os.curdir, os.pardir) or os.sep in name or '/' in name for name in file['path']):
-				file['local_path'] = None
-				continue
 			if args.renamed is not None:
 				if '/'.join(file['path']) != args.renamed:
 					file['local_path'] = None
 					continue
 				file['local_path'] = args.local_data
 			else:
+				if not file['path'] or any(not name or name in (os.curdir, os.pardir) or os.sep in name or '/' in name for name in file['path']):
+					file['local_path'] = None
+					continue
 				file['local_path'] = args.local_data / pathlib.PurePath(*file['path'])
 				if args.partial and '/'.join(file['path']) not in args.partial:
 					continue
