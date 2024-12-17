@@ -105,7 +105,7 @@ def report_file(file, correct):
 		permille = 1
 	else:
 		permille = (correct * 1000 + length // 2) // length
-	print(f'{"/".join(file["path"])}: {permille//10}.{permille%10}% ({correct:,}/{length:,})')
+	print(f'{permille//10:3d}.{permille%10}%  {"/".join(file["path"])}  ({correct:,}/{length:,})')
 
 
 def sha1():
