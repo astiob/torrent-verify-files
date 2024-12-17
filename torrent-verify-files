@@ -28,8 +28,8 @@ parser.add_argument('torrent', type=tp.parse_torrent_file, help='path to the tor
 parser.add_argument('local_data', type=pathlib.Path, help="path to the local data (single file or torrent's root directory)")
 
 group = parser.add_argument_group('optional arguments for multifile torrents',
-	'By default, all files named in the torrent will be verified. '
-	'To verify only some of the files or to use different file names, use one of the following options. '
+	'By default, all files named in the torrent will be verified except padding files, which will be assumed zero-filled. '
+	'To verify only some of the files, to use different file names, or to explicitly verify padding files, use one of the following options. '
 	"Specify the in-torrent path(s) relative to the torrent's root directory. "
 	'Separate subdirectories using forward slashes, e.g. "dir1/dir2/file"')
 group = group.add_mutually_exclusive_group()
@@ -54,17 +54,23 @@ if 'files' in info:
 	for file_index, file in enumerate(files):
 		try:
 			if args.renamed is not None:
-				if '/'.join(file['path']) != args.renamed:
+				if 'path' not in file or '/'.join(file['path']) != args.renamed:
 					file['local_path'] = None
 					continue
 				file['local_path'] = args.local_data
 			else:
-				if not file['path'] or any(not name or name in (os.curdir, os.pardir) or os.sep in name or '/' in name for name in file['path']):
+				if not file.get('path') or any(not name or name in (os.curdir, os.pardir) or os.sep in name or '/' in name for name in file['path']):
 					file['local_path'] = None
 					continue
 				file['local_path'] = args.local_data / pathlib.PurePath(*file['path'])
-				if args.partial and '/'.join(file['path']) not in args.partial:
-					continue
+				if args.partial:
+					if '/'.join(file['path']) not in args.partial:
+						continue
+				else:
+					attr = file.get('attr')
+					ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr
+					if ispadding:
+						continue
 			wanted_files[file_index] = True
 			for piece_index in range(torrent_pos // piece_length, -(-(torrent_pos + file['length']) // piece_length)):
 				wanted_pieces[piece_index] = True
@@ -127,6 +133,27 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 		if not file_length:
 			continue
 		try:
+			if not wanted_files[file_index]:
+				attr = file.get('attr')
+				ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr
+				if ispadding:
+					if piece_filled:
+						nzeros = min(piece_length - piece_filled, file_length)
+						piece_buffer[piece_filled:piece_filled+nzeros] = bytes(nzeros)
+						piece_filled += nzeros
+						if piece_filled == piece_length:
+							hash_piece(0)
+					if not piece_filled:
+						last_piece = (torrent_pos + file_length - 1) // piece_length
+						if wanted_pieces[last_piece]:
+							nzeros = (torrent_pos + file_length) % piece_length
+							piece_buffer[:nzeros] = bytes(nzeros)
+							piece_filled = nzeros
+					# else:
+					# the padding file is too short to fill even one piece,
+					# so keep the half-filled buffer and carry on
+					continue
+
 			path = file['local_path']
 			if (not path
 			    or not wanted_files[file_index]
