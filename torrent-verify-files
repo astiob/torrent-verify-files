@@ -34,9 +34,9 @@ group = parser.add_argument_group('optional arguments for multifile torrents',
 	'Separate subdirectories using forward slashes, e.g. "dir1/dir2/file"')
 group = group.add_mutually_exclusive_group()
 group.add_argument('-p', '--partial', metavar='SUBPATH', type=str, nargs='+',
-                   help="to verify a subset of files: the in-torrent paths to verify")
+                   help='to verify a subset of files: the in-torrent paths to verify')
 group.add_argument('-r', '--renamed', metavar='RENAMED_PATH', type=str,
-                   help="to verify a single renamed file: the in-torrent path corresponding to the single file pointed to by local_data")
+                   help='to verify a single renamed file: the in-torrent path corresponding to the single file pointed to by local_data')
 args = parser.parse_args()
 
 
