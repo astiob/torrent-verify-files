@@ -32,6 +32,8 @@ group = parser.add_argument_group('optional arguments for multifile torrents',
 	'To verify only some of the files, to use different file names, or to explicitly verify padding files, use one of the following options. '
 	"Specify the in-torrent path(s) relative to the torrent's root directory. "
 	'Separate subdirectories using forward slashes, e.g. "dir1/dir2/file"')
+group.add_argument('--no-bitcomet-padding', dest='bitcomet_padding', action='store_false',
+                   help='verify BitComet _____padding_files as normal files that may not be zero-filled even if not explicitly named via another option')
 group = group.add_mutually_exclusive_group()
 group.add_argument('-p', '--partial', metavar='SUBPATH', type=str, nargs='+',
                    help='to verify a subset of files: the in-torrent paths to verify')
@@ -68,7 +70,7 @@ if 'files' in info:
 						continue
 				else:
 					attr = file.get('attr')
-					ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr
+					ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr or args.bitcomet_padding and file['path'][-1].startswith('_____padding_file_')
 					if ispadding:
 						continue
 			wanted_files[file_index] = True
@@ -135,7 +137,7 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 		try:
 			if not wanted_files[file_index]:
 				attr = file.get('attr')
-				ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr
+				ispadding = isinstance(attr, str) and 'p' in attr or isinstance(attr, bytes) and b'p' in attr or args.bitcomet_padding and file['path'][-1].startswith('_____padding_file_')
 				if ispadding:
 					if piece_filled:
 						nzeros = min(piece_length - piece_filled, file_length)
