@@ -134,6 +134,10 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 		file_length = file['length']
 		if not file_length:
 			continue
+
+		first_piece = torrent_pos // piece_length
+		last_piece = (torrent_pos + file_length - 1) // piece_length
+
 		try:
 			if not wanted_files[file_index]:
 				attr = file.get('attr')
@@ -146,7 +150,6 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 						if piece_filled == piece_length:
 							hash_piece(0)
 					if not piece_filled:
-						last_piece = (torrent_pos + file_length - 1) // piece_length
 						if wanted_pieces[last_piece]:
 							nzeros = (torrent_pos + file_length) % piece_length
 							piece_buffer[:nzeros] = bytes(nzeros)
@@ -159,8 +162,8 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 			path = file['local_path']
 			if (not path
 			    or not wanted_files[file_index]
-			       and not wanted_pieces[torrent_pos // piece_length]
-			       and not wanted_pieces[(torrent_pos + file_length - 1) // piece_length]
+			       and not wanted_pieces[first_piece]
+			       and not wanted_pieces[last_piece]
 			):
 				piece_filled = 0
 				continue
@@ -186,8 +189,6 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 					continue
 
 				piece_offset = -torrent_pos % piece_length
-				first_piece = torrent_pos // piece_length
-				last_piece = (torrent_pos + file_length - 1) // piece_length
 				if not wanted_files[file_index] and not wanted_pieces[first_piece]:
 					piece_filled = 0
 					piece_offset = file_length - (torrent_pos + file_length) % piece_length
