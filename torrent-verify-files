@@ -88,7 +88,7 @@ if 'files' in info:
 else:
 	if args.partial or args.renamed is not None:
 		parser.error('the torrent contains only one file, so --partial and --renamed cannot be used')
-	files = [{'length': info['length'], path: args.local_data}]
+	files = [{'length': info['length'], 'path': [info['name']], 'local_path': args.local_data}]
 	wanted_files = [True]
 	wanted_pieces = [True] * len(info['pieces'])
 	wanted_total = info['length']
