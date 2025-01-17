@@ -117,18 +117,19 @@ except TypeError:
 
 
 def hash_piece(file_pos):
-	global piece_filled
+	global piece_filled, pbar_updated
 	hash = sha1()
 	hash.update(memoryview(piece_buffer)[:piece_filled])
 	piece_index = (torrent_pos + file_pos) // piece_length
 	correct_pieces[piece_index] = hash.hexdigest() == info['pieces'][piece_index]
 	pbar.update(piece_filled)
+	pbar_updated += piece_filled
 	piece_filled = 0
 
 
 correct_pieces = [False] * len(info['pieces'])
 piece_buffer = bytearray(piece_length)
-torrent_pos = piece_filled = 0
+torrent_pos = piece_filled = pbar_updated = 0
 with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as pbar:
 	for file_index, file in enumerate(files):
 		file_length = file['length']
@@ -137,6 +138,17 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 
 		first_piece = torrent_pos // piece_length
 		last_piece = (torrent_pos + file_length - 1) // piece_length
+
+		if wanted_files[file_index]:
+			expected_pbar_update = (
+				torrent_pos % piece_length
+				+ file_length
+				- (torrent_pos + file_length) % piece_length
+			)
+		elif wanted_pieces[first_piece] and file_length >= -torrent_pos % piece_length:
+			expected_pbar_update = piece_length
+		else:
+			expected_pbar_update = 0
 
 		try:
 			if not wanted_files[file_index]:
@@ -196,6 +208,9 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 				remain = file_length
 				if piece_offset:
 					if not piece_filled or piece_filled + piece_offset != piece_length:
+						if piece_offset <= file_length and (wanted_files[file_index] or wanted_pieces[first_piece]):
+							pbar.update(piece_length)
+							pbar_updated += piece_length
 						piece_filled = 0
 						piece_offset = min(piece_offset, file_length)
 						nskipped = stream.seek(piece_offset)
@@ -246,6 +261,8 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 						print(f'{"/".join(file["path"])}: local file is longer than specified in the torrent')
 		finally:
 			torrent_pos += file_length
+			pbar.update(expected_pbar_update - pbar_updated)
+			pbar_updated = 0
 	if 0 < piece_filled == torrent_pos % piece_length:
 		hash_piece(0)
 
