@@ -197,6 +197,7 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 				if piece_offset:
 					if not piece_filled or piece_filled + piece_offset != piece_length:
 						piece_filled = 0
+						piece_offset = min(piece_offset, file_length)
 						nskipped = stream.seek(piece_offset)
 						if nskipped < piece_offset:
 							# File is too short
