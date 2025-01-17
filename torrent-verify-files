@@ -166,6 +166,9 @@ with tqdm(total=wanted_total, unit='B', unit_scale=True, unit_divisor=1024) as p
 				continue
 
 			if not path.is_file():
+				if not path.name:
+					piece_filled = 0
+					continue
 				path = path.with_name(path.name + '.part')
 				if not path.is_file():
 					piece_filled = 0
