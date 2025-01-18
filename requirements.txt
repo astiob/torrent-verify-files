@@ -1,0 +1,2 @@
+torrent-parser
+tqdm >= 4.14
