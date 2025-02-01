@@ -25,7 +25,7 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description='Verify local file data against hashes listed in a torrent file.')
 parser.add_argument('torrent', type=tp.parse_torrent_file, help='path to the torrent file')
-parser.add_argument('local_data', type=pathlib.Path, help="path to the local data (single file or torrent's root directory)")
+parser.add_argument('local_data', type=pathlib.Path, help="path to the local data (single file, directory containing the single file, or torrent's root directory)")
 
 group = parser.add_argument_group('optional arguments for multifile torrents',
 	'By default, all files named in the torrent will be verified except padding files, which will be assumed zero-filled. '
@@ -88,6 +88,8 @@ if 'files' in info:
 else:
 	if args.partial or args.renamed is not None:
 		parser.error('the torrent contains only one file, so --partial and --renamed cannot be used')
+	if not (os.sep in info['name'] or '/' in info['name']) and args.local_data.is_dir():
+		args.local_data /= info['name']
 	files = [{'length': info['length'], 'path': [info['name']], 'local_path': args.local_data}]
 	wanted_files = [True]
 	wanted_pieces = [True] * len(info['pieces'])
